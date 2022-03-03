@@ -287,12 +287,14 @@ enum CompareBranchOpcode {
     CBR_CBNZ = 0x35000000, // 0011_0101_0000_0000_0000_0000_0000_0000
 };
 
+#if 0
 static void
 emit_comparebranch_immediate(struct jit_state *state, bool sixty_four, enum CompareBranchOpcode op, enum Registers rt, uint32_t target_pc)
 {
     note_jump(state, target_pc);
     emit_instruction(state, (sixty_four << 31) | op | rt);
 }
+#endif
 
 enum DP1Opcode {
                             //   S          op2--|op-----|
@@ -890,16 +892,17 @@ static void
 divmod(struct jit_state *state, uint16_t pc, uint8_t opcode, int rd, int rn, int rm)
 {
     bool mod = (opcode & EBPF_ALU_OP_MASK) == (EBPF_OP_MOD_IMM & EBPF_ALU_OP_MASK);
-    bool is64 = (opcode & EBPF_CLS_MASK) == EBPF_CLS_ALU64;
+    bool sixty_four = (opcode & EBPF_CLS_MASK) == EBPF_CLS_ALU64;
     enum Registers div_dest = mod ? temp_div_register : rd;
 
     // Handle divide by zero case
-    emit_comparebranch_immediate(state, is64, CBR_CBNZ, rm, pc + 3);
+    // CBNZ rm, .+12 (we don't need to note_jump() as we know the destination immediately).
+    emit_instruction(state, (sixty_four << 31) | CBR_CBNZ | (3 << 5) | rm);
     emit_movewide_immediate(state, true, caller_saved_registers[2], pc);
     emit_unconditionalbranch_immediate(state, UBR_B, TARGET_PC_DIV_BY_ZERO);
-    emit_dataprocessing_twosource(state, is64, DP2_UDIV, div_dest, rn, rm);
+    emit_dataprocessing_twosource(state, sixty_four, DP2_UDIV, div_dest, rn, rm);
     if (mod) {
-        emit_dataprocessing_threesource(state, is64, DP3_MSUB, rd, rm, div_dest, rn);
+        emit_dataprocessing_threesource(state, sixty_four, DP3_MSUB, rd, rm, div_dest, rn);
     }
 }
 
