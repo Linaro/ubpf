@@ -778,6 +778,9 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
 #else
             emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(inst.opcode, inst.imm), dst, dst);
 #endif
+            if (inst.imm == 16) {
+                emit_instruction(state, (1 << sixty_four) | 0x53003c00 | (dst << 5) | dst);
+            }
             break;
         case EBPF_OP_BE:
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
@@ -785,6 +788,9 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
 #else
             /* No-op. */
 #endif
+            if (inst.imm == 16) {
+                emit_instruction(state, (1 << sixty_four) | 0x53003c00 | (dst << 5) | dst);
+            }
             break;
 
         /* TODO use 8 bit immediate when possible */
