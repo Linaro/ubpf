@@ -489,9 +489,10 @@ is_imm_op(struct ebpf_inst const * inst)
     int class = inst->opcode & EBPF_CLS_MASK;
     bool is_imm = (inst->opcode & EBPF_SRC_REG) == EBPF_SRC_IMM;
     bool is_endian = (inst->opcode & EBPF_ALU_OP_MASK) == 0xd0;
+    bool is_neg = (inst->opcode & EBPF_ALU_OP_MASK) == 0x80;
     bool is_call = inst->opcode == EBPF_OP_CALL;
     bool is_exit = inst->opcode == EBPF_OP_EXIT;
-    bool is_alu = (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64) && !is_endian;
+    bool is_alu = (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64) && !is_endian && !is_neg;
     bool is_jmp = class == EBPF_CLS_JMP && !is_call && !is_exit;
     bool is_store = class == EBPF_CLS_ST;
     return (is_imm && (is_alu || is_jmp)) || is_store;
