@@ -149,29 +149,29 @@ emit_addsub_register(struct jit_state *state, bool sixty_four, enum AddSubOpcode
     emit_bytes(state, &instr, 4);
 }
 
-enum LoadStoreOpcode {
-                            // sz    V   op
-    LS_STRB   = 0x39000000, // 0011_1001_0000_0000_0000_0000_0000_0000
-    LS_LDRB   = 0x39400000, // 0011_1001_0100_0000_0000_0000_0000_0000
-    LS_LDRSBX = 0x39800000, // 0011_1001_1000_0000_0000_0000_0000_0000
-    LS_LDRSBW = 0x39c00000, // 0011_1001_1100_0000_0000_0000_0000_0000
-    LS_STRH   = 0x79000000, // 0111_1001_0000_0000_0000_0000_0000_0000
-    LS_LDRH   = 0x79400000, // 0111_1001_0100_0000_0000_0000_0000_0000
-    LS_LDRSHX = 0x79800000, // 0111_1001_1000_0000_0000_0000_0000_0000
-    LS_LDRSHW = 0x79c00000, // 0111_1001_1100_0000_0000_0000_0000_0000
-    LS_STRW   = 0xb9000000, // 1011_1001_0000_0000_0000_0000_0000_0000
-    LS_LDRW   = 0xb9400000, // 1011_1001_0100_0000_0000_0000_0000_0000
-    LS_LDRSW  = 0xb9800000, // 1011_1001_1000_0000_0000_0000_0000_0000
-    LS_STRX   = 0xf9000000, // 1111_1001_0000_0000_0000_0000_0000_0000
-    LS_LDRX   = 0xf9400000, // 1111_1001_0100_0000_0000_0000_0000_0000
-    LS_PRFM   = 0xf9800000, // 1111_1001_1000_0000_0000_0000_0000_0000
+enum LoadStoreUnscaledOpcode {
+                             // sz    V   op
+    LS_STURB   = 0x38000000, // 0011_1000_0000_0000_0000_0000_0000_0000
+    LS_LDURB   = 0x38400000, // 0011_1000_0100_0000_0000_0000_0000_0000
+    LS_LDURSBX = 0x38800000, // 0011_1000_1000_0000_0000_0000_0000_0000
+    LS_LDURSBW = 0x38c00000, // 0011_1000_1100_0000_0000_0000_0000_0000
+    LS_STURH   = 0x78000000, // 0111_1000_0000_0000_0000_0000_0000_0000
+    LS_LDURH   = 0x78400000, // 0111_1000_0100_0000_0000_0000_0000_0000
+    LS_LDURSHX = 0x78800000, // 0111_1000_1000_0000_0000_0000_0000_0000
+    LS_LDURSHW = 0x78c00000, // 0111_1000_1100_0000_0000_0000_0000_0000
+    LS_STURW   = 0xb8000000, // 1011_1000_0000_0000_0000_0000_0000_0000
+    LS_LDURW   = 0xb8400000, // 1011_1000_0100_0000_0000_0000_0000_0000
+    LS_LDURSW  = 0xb8800000, // 1011_1000_1000_0000_0000_0000_0000_0000
+    LS_STURX   = 0xf8000000, // 1111_1000_0000_0000_0000_0000_0000_0000
+    LS_LDURX   = 0xf8400000, // 1111_1000_0100_0000_0000_0000_0000_0000
 };
 
 static void
-emit_loadstore_immediate(struct jit_state *state, enum LoadStoreOpcode op, enum Registers rt, enum Registers rn, uint32_t imm12)
+emit_loadstore_immediate(struct jit_state *state, enum LoadStoreUnscaledOpcode op, enum Registers rt, enum Registers rn, int16_t imm9)
 {
-    assert((imm12 & ~UINT32_C(0xfff)) == 0);
-    uint32_t instr = op | (imm12 << 10) | (rn << 5) | rt;
+    assert(imm9 >= -256 && imm9 < 256);
+    imm9 &= 0x1ff;
+    uint32_t instr = op | (imm9 << 12) | (rn << 5) | rt;
     emit_bytes(state, &instr, 4);
 }
 
@@ -605,34 +605,34 @@ to_dp2_opcode(int opcode)
     }
 }
 
-static enum LoadStoreOpcode
+static enum LoadStoreUnscaledOpcode
 to_loadstore_opcode(int opcode)
 {
     switch (opcode)
     {
     case EBPF_OP_LDXW:
-        return LS_LDRW;
+        return LS_LDURW;
     case EBPF_OP_LDXH:
-        return LS_LDRH;
+        return LS_LDURH;
     case EBPF_OP_LDXB:
-        return LS_LDRB;
+        return LS_LDURB;
     case EBPF_OP_LDXDW:
-        return LS_LDRX;
+        return LS_LDURX;
     case EBPF_OP_STW:
     case EBPF_OP_STXW:
-        return LS_STRW;
+        return LS_STURW;
     case EBPF_OP_STH:
     case EBPF_OP_STXH:
-        return LS_STRH;
+        return LS_STURH;
     case EBPF_OP_STB:
     case EBPF_OP_STXB:
-        return LS_STRB;
+        return LS_STURB;
     case EBPF_OP_STDW:
     case EBPF_OP_STXDW:
-        return LS_STRX;
+        return LS_STURX;
     default:
         assert(false);
-        return (enum LoadStoreOpcode)BAD_OPCODE;
+        return (enum LoadStoreUnscaledOpcode)BAD_OPCODE;
     }
 }
 
