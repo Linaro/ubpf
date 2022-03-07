@@ -515,6 +515,17 @@ is_simple_imm(struct ebpf_inst const *inst)
     case EBPF_OP_ADD64_IMM:
     case EBPF_OP_SUB_IMM:
     case EBPF_OP_SUB64_IMM:
+    case EBPF_OP_JEQ_IMM:
+    case EBPF_OP_JGT_IMM:
+    case EBPF_OP_JGE_IMM:
+    case EBPF_OP_JSET_IMM:
+    case EBPF_OP_JNE_IMM:
+    case EBPF_OP_JSGT_IMM:
+    case EBPF_OP_JSGE_IMM:
+    case EBPF_OP_JLT_IMM:
+    case EBPF_OP_JLE_IMM:
+    case EBPF_OP_JSLT_IMM:
+    case EBPF_OP_JSLE_IMM:
         return inst->imm >= 0 && inst->imm < 0x1000;
     case EBPF_OP_MOV_IMM:
     case EBPF_OP_MOV64_IMM:
@@ -539,18 +550,6 @@ is_simple_imm(struct ebpf_inst const *inst)
     case EBPF_OP_MOD64_IMM:
     case EBPF_OP_MUL_IMM:
     case EBPF_OP_MUL64_IMM:
-        return false;
-    case EBPF_OP_JEQ_IMM:
-    case EBPF_OP_JGT_IMM:
-    case EBPF_OP_JGE_IMM:
-    case EBPF_OP_JSET_IMM:
-    case EBPF_OP_JNE_IMM:
-    case EBPF_OP_JSGT_IMM:
-    case EBPF_OP_JSGE_IMM:
-    case EBPF_OP_JLT_IMM:
-    case EBPF_OP_JLE_IMM:
-    case EBPF_OP_JSLT_IMM:
-    case EBPF_OP_JSLE_IMM:
         return false;
     case EBPF_OP_STB:
     case EBPF_OP_STH:
@@ -878,24 +877,27 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             emit_unconditionalbranch_immediate(state, UBR_B, target_pc);
             break;
         case EBPF_OP_JEQ_IMM:
-        case EBPF_OP_JEQ_REG:
         case EBPF_OP_JGT_IMM:
-        case EBPF_OP_JGT_REG:
         case EBPF_OP_JGE_IMM:
-        case EBPF_OP_JGE_REG:
         case EBPF_OP_JLT_IMM:
-        case EBPF_OP_JLT_REG:
         case EBPF_OP_JLE_IMM:
-        case EBPF_OP_JLE_REG:
         case EBPF_OP_JNE_IMM:
-        case EBPF_OP_JNE_REG:
         case EBPF_OP_JSGT_IMM:
-        case EBPF_OP_JSGT_REG:
         case EBPF_OP_JSGE_IMM:
-        case EBPF_OP_JSGE_REG:
         case EBPF_OP_JSLT_IMM:
-        case EBPF_OP_JSLT_REG:
         case EBPF_OP_JSLE_IMM:
+            emit_addsub_immediate(state, sixty_four, AS_SUBS, RZ, dst, inst.imm);
+            emit_conditionalbranch_immediate(state, to_condition(opcode), target_pc);
+            break;
+        case EBPF_OP_JEQ_REG:
+        case EBPF_OP_JGT_REG:
+        case EBPF_OP_JGE_REG:
+        case EBPF_OP_JLT_REG:
+        case EBPF_OP_JLE_REG:
+        case EBPF_OP_JNE_REG:
+        case EBPF_OP_JSGT_REG:
+        case EBPF_OP_JSGE_REG:
+        case EBPF_OP_JSLT_REG:
         case EBPF_OP_JSLE_REG:
             emit_addsub_register(state, sixty_four, AS_SUBS, RZ, dst, src);
             emit_conditionalbranch_immediate(state, to_condition(opcode), target_pc);
