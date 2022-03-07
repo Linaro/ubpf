@@ -515,7 +515,7 @@ is_simple_imm(struct ebpf_inst const *inst)
     case EBPF_OP_ADD64_IMM:
     case EBPF_OP_SUB_IMM:
     case EBPF_OP_SUB64_IMM:
-        return false;
+        return inst->imm >= 0 && inst->imm < 0x1000;
     case EBPF_OP_MOV_IMM:
     case EBPF_OP_MOV64_IMM:
         return true;
@@ -780,16 +780,18 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             opcode = to_reg_op(opcode);
         }
 
-        switch (inst.opcode) {
+        switch (opcode) {
         case EBPF_OP_ADD_IMM:
-        case EBPF_OP_ADD_REG:
-        case EBPF_OP_SUB_IMM:
-        case EBPF_OP_SUB_REG:
         case EBPF_OP_ADD64_IMM:
-        case EBPF_OP_ADD64_REG:
+        case EBPF_OP_SUB_IMM:
         case EBPF_OP_SUB64_IMM:
+            emit_addsub_immediate(state, sixty_four, to_addsub_opcode(opcode), dst, dst, inst.imm);
+            break;
+        case EBPF_OP_ADD_REG:
+        case EBPF_OP_ADD64_REG:
+        case EBPF_OP_SUB_REG:
         case EBPF_OP_SUB64_REG:
-            emit_addsub_register(state, sixty_four, to_addsub_opcode(inst.opcode), dst, dst, src);
+            emit_addsub_register(state, sixty_four, to_addsub_opcode(opcode), dst, dst, src);
             break;
         case EBPF_OP_LSH_IMM:
         case EBPF_OP_LSH_REG:
@@ -804,7 +806,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_ARSH64_IMM:
         case EBPF_OP_ARSH64_REG:
             /* TODO: CHECK imm is small enough.  */
-            emit_dataprocessing_twosource(state, sixty_four, to_dp2_opcode(inst.opcode), dst, dst, src);
+            emit_dataprocessing_twosource(state, sixty_four, to_dp2_opcode(opcode), dst, dst, src);
             break;
         case EBPF_OP_MUL_IMM:
         case EBPF_OP_MUL_REG:
@@ -820,7 +822,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_DIV64_REG:
         case EBPF_OP_MOD64_IMM:
         case EBPF_OP_MOD64_REG:
-            divmod(state, i, inst.opcode, dst, dst, src);
+            divmod(state, i, opcode, dst, dst, src);
             break;
         case EBPF_OP_OR_IMM:
         case EBPF_OP_OR_REG:
@@ -834,7 +836,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_AND64_REG:
         case EBPF_OP_XOR64_IMM:
         case EBPF_OP_XOR64_REG:
-            emit_logical_register(state, sixty_four, to_logical_opcode(inst.opcode), dst, dst, src);
+            emit_logical_register(state, sixty_four, to_logical_opcode(opcode), dst, dst, src);
             break;
         case EBPF_OP_NEG:
         case EBPF_OP_NEG64:
@@ -852,7 +854,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
             /* No-op */
 #else
-            emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(inst.opcode, inst.imm), dst, dst);
+            emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(opcode, inst.imm), dst, dst);
 #endif
             if (inst.imm == 16) {
                 /* UXTH dst, dst. */
@@ -861,7 +863,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             break;
         case EBPF_OP_BE:
 #if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
-            emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(inst.opcode, inst.imm), dst, dst);
+            emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(opcode, inst.imm), dst, dst);
 #else
             /* No-op. */
 #endif
@@ -896,12 +898,12 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_JSLE_IMM:
         case EBPF_OP_JSLE_REG:
             emit_addsub_register(state, sixty_four, AS_SUBS, RZ, dst, src);
-            emit_conditionalbranch_immediate(state, to_condition(inst.opcode), target_pc);
+            emit_conditionalbranch_immediate(state, to_condition(opcode), target_pc);
             break;
         case EBPF_OP_JSET_IMM:
         case EBPF_OP_JSET_REG:
             emit_logical_register(state, sixty_four, LOG_ANDS, RZ, dst, src);
-            emit_conditionalbranch_immediate(state, to_condition(inst.opcode), target_pc);
+            emit_conditionalbranch_immediate(state, to_condition(opcode), target_pc);
             break;
         case EBPF_OP_CALL:
             emit_call(state, (uintptr_t)vm->ext_funcs[inst.imm]);
@@ -920,7 +922,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_LDXH:
         case EBPF_OP_LDXB:
         case EBPF_OP_LDXDW:
-            emit_loadstore_immediate(state, to_loadstore_opcode(inst.opcode), dst, src, inst.offset);
+            emit_loadstore_immediate(state, to_loadstore_opcode(opcode), dst, src, inst.offset);
             break;
 
         case EBPF_OP_STW:
@@ -931,7 +933,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         case EBPF_OP_STXH:
         case EBPF_OP_STXB:
         case EBPF_OP_STXDW:
-            emit_loadstore_immediate(state, to_loadstore_opcode(inst.opcode), src, dst, inst.offset);
+            emit_loadstore_immediate(state, to_loadstore_opcode(opcode), src, dst, inst.offset);
             break;
 
         case EBPF_OP_LDDW: {
@@ -942,7 +944,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
         }
 
         default:
-            *errmsg = ubpf_error("Unknown instruction at PC %d: opcode %02x", i, inst.opcode);
+            *errmsg = ubpf_error("Unknown instruction at PC %d: opcode %02x", i, opcode);
             return -1;
         }
     }
