@@ -487,15 +487,17 @@ static int
 is_alu_imm_op(struct ebpf_inst const * inst)
 {
     int class = inst->opcode & EBPF_CLS_MASK;
-    int is_imm = (inst->opcode & EBPF_SRC_REG) == EBPF_SRC_IMM;
-    int is_endian = (inst->opcode & EBPF_ALU_OP_MASK) == 0xd0;
-    return is_imm && (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64) && !is_endian;
+    bool is_imm = (inst->opcode & EBPF_SRC_REG) == EBPF_SRC_IMM;
+    bool is_endian = (inst->opcode & EBPF_ALU_OP_MASK) == 0xd0;
+    bool is_call = inst->opcode == EBPF_OP_CALL;
+    return is_imm && (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64 || class == EBPF_CLS_JMP) && !is_endian && !is_call;
 }
 
 static int
 is_alu64_op(struct ebpf_inst const * inst)
 {
-    return (inst->opcode & EBPF_CLS_MASK) == EBPF_CLS_ALU64;
+    int class = inst->opcode & EBPF_CLS_MASK;
+    return class == EBPF_CLS_ALU64 || class == EBPF_CLS_JMP;
 }
 
 static enum AddSubOpcode
