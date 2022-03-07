@@ -64,27 +64,6 @@ struct jit_state {
     uint32_t string_table_register_pointer; // Offset in buf that the string_table_register points to.
 };
 
-static void
-emit_bytes(struct jit_state *state, void *data, uint32_t len)
-{
-    assert(len <= state->size);
-    assert(state->offset <= state->size - len);
-    if ((state->offset + len) > state->size) {
-        state->offset = state->size;
-        return;
-    }
-    memcpy(state->buf + state->offset, data, len);
-    state->offset += len;
-}
-
-static void emit_instruction(struct jit_state *state, uint32_t instr)
-{
-    assert(instr != BAD_OPCODE);
-    emit_bytes(state, &instr, 4);
-}
-
-static void divmod(struct jit_state *state, uint16_t pc, uint8_t opcode, int rd, int rn, int rm);
-
 #define REGISTER_MAP_SIZE 11
 
 enum Registers {R0, R1, R2, R3, R4, R5, R6, R7, R8, R9, R10, R11, R12, R13, R14, R15, R16, R17, R18, R19, R20, R21, R22, R23, R24, R25, R26, R27, R28, R29, R30, SP, RZ = 31};
@@ -124,6 +103,28 @@ map_register(int r)
 {
     assert(r < REGISTER_MAP_SIZE);
     return register_map[r % REGISTER_MAP_SIZE];
+}
+
+static void emit_movewide_immediate(struct jit_state *state, bool sixty_four, enum Registers rd, uint64_t imm);
+static void divmod(struct jit_state *state, uint16_t pc, uint8_t opcode, int rd, int rn, int rm);
+
+static void
+emit_bytes(struct jit_state *state, void *data, uint32_t len)
+{
+    assert(len <= state->size);
+    assert(state->offset <= state->size - len);
+    if ((state->offset + len) > state->size) {
+        state->offset = state->size;
+        return;
+    }
+    memcpy(state->buf + state->offset, data, len);
+    state->offset += len;
+}
+
+static void emit_instruction(struct jit_state *state, uint32_t instr)
+{
+    assert(instr != BAD_OPCODE);
+    emit_bytes(state, &instr, 4);
 }
 
 enum AddSubOpcode { AS_ADD = 0, AS_ADDS = 1, AS_SUB = 2, AS_SUBS = 3 };
@@ -229,8 +230,8 @@ emit_unconditonalbranch_register(struct jit_state *state, enum UnconditionalBran
     emit_instruction(state, op | (rn << 5));
 }
 
-static void emit_call(struct jit_state *state) {
-    /* On entry the destination of the call will already have been put in temp_register.  */
+static void emit_call(struct jit_state *state, uintptr_t func) {
+    emit_movewide_immediate(state, true, temp_register, func);
     emit_unconditonalbranch_register(state, BR_BLR, temp_register);
 
     /* On exit need to move result from r0 to whichever register we've mapped EBPF r0 to.  */
@@ -826,7 +827,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             emit_conditionalbranch_immediate(state, to_condition(inst.opcode), target_pc);
             break;
         case EBPF_OP_CALL:
-            emit_call(state);
+            emit_call(state, (uintptr_t)vm->ext_funcs[inst.imm]);
             if (inst.imm == vm->unwind_stack_extension_index) {
                 emit_addsub_immediate(state, true, AS_SUBS, RZ, map_register(0), 0);
                 emit_conditionalbranch_immediate(state, COND_EQ, TARGET_PC_EXIT);
@@ -879,8 +880,7 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
        pc has already been set up by emit_divmod(). */
     emit_string_load(state, caller_saved_registers[1], UBPF_STRING_ID_DIVIDE_BY_ZERO);
     emit_movewide_immediate(state, true,caller_saved_registers[0], (uintptr_t)stderr);
-    emit_movewide_immediate(state, true, temp_register, (uintptr_t)vm->error_printf);
-    emit_call(state);
+    emit_call(state, (uintptr_t)vm->error_printf);
 
     emit_movewide_immediate(state, true, map_register(0), ((uint64_t)INT64_C(-1)));
     emit_unconditionalbranch_immediate(state, UBR_B, TARGET_PC_EXIT);
