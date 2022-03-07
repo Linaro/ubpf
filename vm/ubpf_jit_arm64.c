@@ -484,13 +484,15 @@ emit_function_epilogue(struct jit_state *state)
 }
 
 static int
-is_alu_imm_op(struct ebpf_inst const * inst)
+is_imm_op(struct ebpf_inst const * inst)
 {
     int class = inst->opcode & EBPF_CLS_MASK;
     bool is_imm = (inst->opcode & EBPF_SRC_REG) == EBPF_SRC_IMM;
     bool is_endian = (inst->opcode & EBPF_ALU_OP_MASK) == 0xd0;
     bool is_call = inst->opcode == EBPF_OP_CALL;
-    return is_imm && (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64 || class == EBPF_CLS_JMP) && !is_endian && !is_call;
+    bool is_alu = (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64) && !is_endian;
+    bool is_jmp = class == EBPF_CLS_JMP && !is_call;
+    return is_imm && (is_alu || is_jmp);
 }
 
 static int
@@ -668,7 +670,7 @@ to_condition(int opcode)
         return COND_GE;
     case EBPF_OP_JSLT_IMM:
     case EBPF_OP_JSLT_REG:
-        return COND_LE;
+        return COND_LT;
     case EBPF_OP_JSLE_IMM:
     case EBPF_OP_JSLE_REG:
         return COND_LE;
@@ -696,8 +698,8 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
 
         int sixty_four = is_alu64_op(&inst);
 
-        if (is_alu_imm_op(&inst)) {
-            emit_movewide_immediate(state, sixty_four, temp_register, inst.imm);
+        if (is_imm_op(&inst)) {
+            emit_movewide_immediate(state, sixty_four, temp_register, (int64_t)inst.imm);
             src = temp_register;
         }
 
