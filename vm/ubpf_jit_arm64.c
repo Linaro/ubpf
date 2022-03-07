@@ -1,6 +1,7 @@
 /*
  * Copyright 2015 Big Switch Networks, Inc
  * Copyright 2017 Google Inc.
+ * Copyright 2022 Linaro Limited
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -88,9 +89,9 @@ static enum Registers temp_div_register = R25;
 // the result during the function and do an extra final move at the end of the function to copy the
 // result to the correct place.
 static enum Registers register_map[REGISTER_MAP_SIZE] = {
-    5, // result
-    0, 1, 2, 3, 4, // parameters
-    19, 20, 21, 22, 23, // callee-saved
+    R5, // result
+    R0, R1, R2, R3, R4, // parameters
+    R19, R20, R21, R22, R23, // callee-saved
 };
 
 /* Return the Arm64 register for the given eBPF register */
@@ -279,7 +280,7 @@ emit_conditionalbranch_immediate(struct jit_state *state, enum Condition cond, u
 }
 
 enum CompareBranchOpcode {
-                          //          o
+                           //          o
     CBR_CBZ  = 0x34000000, // 0011_0100_0000_0000_0000_0000_0000_0000
     CBR_CBNZ = 0x35000000, // 0011_0101_0000_0000_0000_0000_0000_0000
 };
@@ -957,7 +958,7 @@ resolve_strings(struct jit_state *state)
 
 
 int
-ubpf_translate_arm64(struct ubpf_vm *vm, uint8_t * buffer, size_t * size, char **errmsg)
+ubpf_translate_arm64(struct ubpf_vm *vm, uint8_t *buffer, size_t *size, char **errmsg)
 {
     struct jit_state state;
     int result = -1;
