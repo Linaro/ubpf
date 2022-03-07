@@ -61,7 +61,6 @@ struct jit_state {
     int num_strings;
     uint32_t string_table_loc;
     uint32_t stack_size;
-    uint32_t string_table_register_pointer; // Offset in buf that the string_table_register points to.
 };
 
 #define REGISTER_MAP_SIZE 11
@@ -76,8 +75,6 @@ static enum Registers caller_saved_registers[] = {R0, R1, R2, R3, R4};
 static enum Registers temp_register = R24; 
 // Temp register for division results
 static enum Registers temp_div_register = R25;
-// Register to hold string table base pointer
-static enum Registers string_table_register = R26;
 
 // Register assignments:
 //   BPF        Arm64       Usage
@@ -86,7 +83,6 @@ static enum Registers string_table_register = R26;
 //   r6 - r10   r19 - r23   Callee-saved registers
 //              r24         Temp - used for generating 32-bit immediates
 //              r25         Temp - used for modulous calculations
-//              r26         String table pointer.
 //
 // Note that the AArch64 ABI uses r0 both for function parameters and result.  We use r5 to hold
 // the result during the function and do an extra final move at the end of the function to copy the
@@ -451,11 +447,6 @@ emit_function_prologue(struct jit_state *state, size_t ubpf_stack_size)
 
     /* Setup UBPF frame pointer. */
     emit_addsub_immediate(state, true, AS_ADD, map_register(10), SP, register_space);
-
-    /* Setup string table pool pointer. */
-    state->string_table_register_pointer = state->offset;
-    // ADR string_table_register, #0
-    emit_instruction(state, (0 << 29) | (1 << 28) | (0 << 5) | string_table_register);
 }
 
 static void
@@ -467,7 +458,8 @@ emit_string_load(struct jit_state *state, enum Registers dst, int string_id)
 
     state->strings[state->num_strings].offset_loc = state->offset;
     state->strings[state->num_strings].string_id = string_id;
-    emit_addsub_immediate(state, true, AS_ADD, dst, string_table_register, 0);
+    // ADR dst, #0 - will be fixed up later.
+    emit_instruction(state, (0 << 29) | (1 << 28) | (0 << 5) | dst);
     state->num_strings++;
 }
 
