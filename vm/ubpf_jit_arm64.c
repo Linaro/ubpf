@@ -484,7 +484,7 @@ emit_function_epilogue(struct jit_state *state)
     emit_unconditonalbranch_register(state, BR_RET, R30);
 }
 
-static int
+static bool
 is_imm_op(struct ebpf_inst const * inst)
 {
     int class = inst->opcode & EBPF_CLS_MASK;
@@ -493,17 +493,88 @@ is_imm_op(struct ebpf_inst const * inst)
     bool is_neg = (inst->opcode & EBPF_ALU_OP_MASK) == 0x80;
     bool is_call = inst->opcode == EBPF_OP_CALL;
     bool is_exit = inst->opcode == EBPF_OP_EXIT;
+    bool is_ja = inst->opcode == EBPF_OP_JA;
     bool is_alu = (class == EBPF_CLS_ALU || class == EBPF_CLS_ALU64) && !is_endian && !is_neg;
-    bool is_jmp = class == EBPF_CLS_JMP && !is_call && !is_exit;
+    bool is_jmp = class == EBPF_CLS_JMP && !is_ja && !is_call && !is_exit;
     bool is_store = class == EBPF_CLS_ST;
     return (is_imm && (is_alu || is_jmp)) || is_store;
 }
 
-static int
+static bool
 is_alu64_op(struct ebpf_inst const * inst)
 {
     int class = inst->opcode & EBPF_CLS_MASK;
     return class == EBPF_CLS_ALU64 || class == EBPF_CLS_JMP;
+}
+
+static bool
+is_simple_imm(struct ebpf_inst const *inst)
+{
+    switch (inst->opcode) {
+    case EBPF_OP_ADD_IMM:
+    case EBPF_OP_ADD64_IMM:
+    case EBPF_OP_SUB_IMM:
+    case EBPF_OP_SUB64_IMM:
+        return false;
+    case EBPF_OP_MOV_IMM:
+    case EBPF_OP_MOV64_IMM:
+        return true;
+    case EBPF_OP_AND_IMM:
+    case EBPF_OP_AND64_IMM:
+    case EBPF_OP_OR_IMM:
+    case EBPF_OP_OR64_IMM:
+    case EBPF_OP_XOR_IMM:
+    case EBPF_OP_XOR64_IMM:
+        return false;
+    case EBPF_OP_ARSH_IMM:
+    case EBPF_OP_ARSH64_IMM:
+    case EBPF_OP_LSH_IMM:
+    case EBPF_OP_LSH64_IMM:
+    case EBPF_OP_RSH_IMM:
+    case EBPF_OP_RSH64_IMM:
+        return false;
+    case EBPF_OP_DIV_IMM:
+    case EBPF_OP_DIV64_IMM:
+    case EBPF_OP_MOD_IMM:
+    case EBPF_OP_MOD64_IMM:
+    case EBPF_OP_MUL_IMM:
+    case EBPF_OP_MUL64_IMM:
+        return false;
+    case EBPF_OP_JEQ_IMM:
+    case EBPF_OP_JGT_IMM:
+    case EBPF_OP_JGE_IMM:
+    case EBPF_OP_JSET_IMM:
+    case EBPF_OP_JNE_IMM:
+    case EBPF_OP_JSGT_IMM:
+    case EBPF_OP_JSGE_IMM:
+    case EBPF_OP_JLT_IMM:
+    case EBPF_OP_JLE_IMM:
+    case EBPF_OP_JSLT_IMM:
+    case EBPF_OP_JSLE_IMM:
+        return false;
+    case EBPF_OP_STB:
+    case EBPF_OP_STH:
+    case EBPF_OP_STW:
+    case EBPF_OP_STDW:
+        return false;
+    default:
+        assert(false);
+        return false;
+    }
+}
+
+static uint8_t
+to_reg_op(uint8_t opcode)
+{
+    int class = opcode & EBPF_CLS_MASK;
+    if (class == EBPF_CLS_ALU64 || class == EBPF_CLS_ALU || class == EBPF_CLS_JMP) {
+        return opcode | EBPF_SRC_REG;
+    }
+    else if (class == EBPF_CLS_ST) {
+        return (opcode & ~EBPF_CLS_MASK) | EBPF_CLS_STX;
+    }
+    assert(false);
+    return 0;
 }
 
 static enum AddSubOpcode
@@ -698,13 +769,15 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
 
         enum Registers dst = map_register(inst.dst);
         enum Registers src = map_register(inst.src);
+        uint8_t opcode = inst.opcode;
         uint32_t target_pc = i + inst.offset + 1;
 
         int sixty_four = is_alu64_op(&inst);
 
-        if (is_imm_op(&inst)) {
+        if (is_imm_op(&inst) && !is_simple_imm(&inst)) {
             emit_movewide_immediate(state, sixty_four, temp_register, (int64_t)inst.imm);
             src = temp_register;
+            opcode = to_reg_op(opcode);
         }
 
         switch (inst.opcode) {
@@ -768,8 +841,10 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             emit_addsub_register(state, sixty_four, AS_SUB, dst, RZ, src);
             break;
         case EBPF_OP_MOV_IMM:
-        case EBPF_OP_MOV_REG:
         case EBPF_OP_MOV64_IMM:
+            emit_movewide_immediate(state, sixty_four, dst, (int64_t)inst.imm);
+            break;
+        case EBPF_OP_MOV_REG:
         case EBPF_OP_MOV64_REG:
             emit_logical_register(state, sixty_four, LOG_ORR, dst, RZ, src);
             break;
