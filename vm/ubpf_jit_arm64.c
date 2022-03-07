@@ -776,7 +776,8 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             emit_dataprocessing_onesource(state, sixty_four, to_dp1_opcode(inst.opcode, inst.imm), dst, dst);
 #endif
             if (inst.imm == 16) {
-                emit_instruction(state, (1 << sixty_four) | 0x53003c00 | (dst << 5) | dst);
+                /* UXTH dst, dst. */
+                emit_instruction(state, 0x53003c00 | (dst << 5) | dst);
             }
             break;
         case EBPF_OP_BE:
@@ -786,7 +787,8 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             /* No-op. */
 #endif
             if (inst.imm == 16) {
-                emit_instruction(state, (1 << sixty_four) | 0x53003c00 | (dst << 5) | dst);
+                /* UXTH dst, dst. */
+                emit_instruction(state, 0x53003c00 | (dst << 5) | dst);
             }
             break;
 
