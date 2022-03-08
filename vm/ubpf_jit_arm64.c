@@ -76,6 +76,8 @@ static enum Registers caller_saved_registers[] = {R0, R1, R2, R3, R4};
 static enum Registers temp_register = R24; 
 // Temp register for division results
 static enum Registers temp_div_register = R25;
+// Temp register for load/store offsets
+static enum Registers offset_register = R26;
 
 // Register assignments:
 //   BPF        Arm64       Usage
@@ -84,6 +86,7 @@ static enum Registers temp_div_register = R25;
 //   r6 - r10   r19 - r23   Callee-saved registers
 //              r24         Temp - used for generating 32-bit immediates
 //              r25         Temp - used for modulous calculations
+//              r26         Temp - used for large load/store offsets
 //
 // Note that the AArch64 ABI uses r0 both for function parameters and result.  We use r5 to hold
 // the result during the function and do an extra final move at the end of the function to copy the
@@ -150,30 +153,37 @@ emit_addsub_register(struct jit_state *state, bool sixty_four, enum AddSubOpcode
     emit_bytes(state, &instr, 4);
 }
 
-enum LoadStoreUnscaledOpcode {
-                             // sz    V   op
-    LS_STURB   = 0x38000000, // 0011_1000_0000_0000_0000_0000_0000_0000
-    LS_LDURB   = 0x38400000, // 0011_1000_0100_0000_0000_0000_0000_0000
-    LS_LDURSBX = 0x38800000, // 0011_1000_1000_0000_0000_0000_0000_0000
-    LS_LDURSBW = 0x38c00000, // 0011_1000_1100_0000_0000_0000_0000_0000
-    LS_STURH   = 0x78000000, // 0111_1000_0000_0000_0000_0000_0000_0000
-    LS_LDURH   = 0x78400000, // 0111_1000_0100_0000_0000_0000_0000_0000
-    LS_LDURSHX = 0x78800000, // 0111_1000_1000_0000_0000_0000_0000_0000
-    LS_LDURSHW = 0x78c00000, // 0111_1000_1100_0000_0000_0000_0000_0000
-    LS_STURW   = 0xb8000000, // 1011_1000_0000_0000_0000_0000_0000_0000
-    LS_LDURW   = 0xb8400000, // 1011_1000_0100_0000_0000_0000_0000_0000
-    LS_LDURSW  = 0xb8800000, // 1011_1000_1000_0000_0000_0000_0000_0000
-    LS_STURX   = 0xf8000000, // 1111_1000_0000_0000_0000_0000_0000_0000
-    LS_LDURX   = 0xf8400000, // 1111_1000_0100_0000_0000_0000_0000_0000
+enum LoadStoreOpcode {
+                            // sz    V   op
+    LS_STRB   = 0x00000000, // 0000_0000_0000_0000_0000_0000_0000_0000
+    LS_LDRB   = 0x00400000, // 0000_0000_0100_0000_0000_0000_0000_0000
+    LS_LDRSBX = 0x00800000, // 0000_0000_1000_0000_0000_0000_0000_0000
+    LS_LDRSBW = 0x00c00000, // 0000_0000_1100_0000_0000_0000_0000_0000
+    LS_STRH   = 0x40000000, // 0100_0000_0000_0000_0000_0000_0000_0000
+    LS_LDRH   = 0x40400000, // 0100_0000_0100_0000_0000_0000_0000_0000
+    LS_LDRSHX = 0x40800000, // 0100_0000_1000_0000_0000_0000_0000_0000
+    LS_LDRSHW = 0x40c00000, // 0100_0000_1100_0000_0000_0000_0000_0000
+    LS_STRW   = 0x80000000, // 1000_0000_0000_0000_0000_0000_0000_0000
+    LS_LDRW   = 0x80400000, // 1000_0000_0100_0000_0000_0000_0000_0000
+    LS_LDRSW  = 0x80800000, // 1000_0000_1000_0000_0000_0000_0000_0000
+    LS_STRX   = 0xc0000000, // 1100_0000_0000_0000_0000_0000_0000_0000
+    LS_LDRX   = 0xc0400000, // 1100_0000_0100_0000_0000_0000_0000_0000
 };
 
 static void
-emit_loadstore_immediate(struct jit_state *state, enum LoadStoreUnscaledOpcode op, enum Registers rt, enum Registers rn, int16_t imm9)
+emit_loadstore_immediate(struct jit_state *state, enum LoadStoreOpcode op, enum Registers rt, enum Registers rn, int16_t imm9)
 {
+    const uint32_t imm_op_base = 0x38000000;
     assert(imm9 >= -256 && imm9 < 256);
     imm9 &= 0x1ff;
-    uint32_t instr = op | (imm9 << 12) | (rn << 5) | rt;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, imm_op_base | op | (imm9 << 12) | (rn << 5) | rt);
+}
+
+static void
+emit_loadstore_register(struct jit_state *state, enum LoadStoreOpcode op, enum Registers rt, enum Registers rn, enum Registers rm)
+{
+    const uint32_t reg_op_base = 0x38206800;
+    emit_instruction(state, op | reg_op_base | (rm << 16) | (rn << 5) | rt);
 }
 
 enum LoadStorePairOpcode {
@@ -680,34 +690,34 @@ to_dp2_opcode(int opcode)
     }
 }
 
-static enum LoadStoreUnscaledOpcode
+static enum LoadStoreOpcode
 to_loadstore_opcode(int opcode)
 {
     switch (opcode)
     {
     case EBPF_OP_LDXW:
-        return LS_LDURW;
+        return LS_LDRW;
     case EBPF_OP_LDXH:
-        return LS_LDURH;
+        return LS_LDRH;
     case EBPF_OP_LDXB:
-        return LS_LDURB;
+        return LS_LDRB;
     case EBPF_OP_LDXDW:
-        return LS_LDURX;
+        return LS_LDRX;
     case EBPF_OP_STW:
     case EBPF_OP_STXW:
-        return LS_STURW;
+        return LS_STRW;
     case EBPF_OP_STH:
     case EBPF_OP_STXH:
-        return LS_STURH;
+        return LS_STRH;
     case EBPF_OP_STB:
     case EBPF_OP_STXB:
-        return LS_STURB;
+        return LS_STRB;
     case EBPF_OP_STDW:
     case EBPF_OP_STXDW:
-        return LS_STURX;
+        return LS_STRX;
     default:
         assert(false);
-        return (enum LoadStoreUnscaledOpcode)BAD_OPCODE;
+        return (enum LoadStoreOpcode)BAD_OPCODE;
     }
 }
 
@@ -902,18 +912,27 @@ translate(struct ubpf_vm *vm, struct jit_state *state, char **errmsg)
             }
             break;
 
-        case EBPF_OP_LDXW:
-        case EBPF_OP_LDXH:
-        case EBPF_OP_LDXB:
-        case EBPF_OP_LDXDW:
-            emit_loadstore_immediate(state, to_loadstore_opcode(opcode), dst, src, inst.offset);
-            break;
-
         case EBPF_OP_STXW:
         case EBPF_OP_STXH:
         case EBPF_OP_STXB:
         case EBPF_OP_STXDW:
-            emit_loadstore_immediate(state, to_loadstore_opcode(opcode), src, dst, inst.offset);
+            {
+                enum Registers tmp = dst;
+                dst = src;
+                src = tmp;
+            }
+            /* fallthrough: */
+        case EBPF_OP_LDXW:
+        case EBPF_OP_LDXH:
+        case EBPF_OP_LDXB:
+        case EBPF_OP_LDXDW:
+            if (inst.offset >= -256 && inst.offset < 256) {
+                emit_loadstore_immediate(state, to_loadstore_opcode(opcode), dst, src, inst.offset);
+            }
+            else {
+                emit_movewide_immediate(state, true, offset_register, inst.offset);
+                emit_loadstore_register(state, to_loadstore_opcode(opcode), dst, src, offset_register);
+            }
             break;
 
         case EBPF_OP_LDDW: {
