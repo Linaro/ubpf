@@ -137,20 +137,20 @@ enum AddSubOpcode { AS_ADD = 0, AS_ADDS = 1, AS_SUB = 2, AS_SUBS = 3 };
 static void
 emit_addsub_immediate(struct jit_state *state, bool sixty_four, enum AddSubOpcode op, enum Registers rd, enum Registers rn, uint32_t imm12)
 {
+    const uint32_t imm_op_base = 0x11000000;
     bool sh = imm12 >= (1 << 12);
     assert(!sh || (imm12 & 0xfff) == 0);
     if (sh) { 
         imm12 >>= 12; 
     }
-    uint32_t instr = (sixty_four << 31) | (op << 29) | (1 << 28) | (1 << 24) | (sh << 22) | (imm12 << 10) | (rn << 5) | (rd << 0);
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, (sixty_four << 31) | (op << 29) | imm_op_base | (sh << 22) | (imm12 << 10) | (rn << 5) | rd);
 }
 
 static void
 emit_addsub_register(struct jit_state *state, bool sixty_four, enum AddSubOpcode op, enum Registers rd, enum Registers rn, enum Registers rm)
 {
-    uint32_t instr = (sixty_four << 31) | (op << 29) | (1 << 27) | (3 << 24) | (rm << 16) | (rn << 5) | (rd << 0);
-    emit_bytes(state, &instr, 4);
+    const uint32_t reg_op_base = 0x0b000000;
+    emit_instruction(state, (sixty_four << 31) | (op << 29) | reg_op_base | (rm << 16) | (rn << 5) | rd);
 }
 
 enum LoadStoreOpcode {
@@ -201,8 +201,7 @@ emit_loadstorepair_immediate(struct jit_state *state, enum LoadStorePairOpcode o
     int32_t imm_div = ((op == LSP_STPX) || (op == LSP_LDPX)) ? 8 : 4;
     assert(imm7 % imm_div == 0);
     imm7 /= imm_div;
-    uint32_t instr = op | (imm7 << 15) | (rt2 << 10) | (rn << 5) | rt;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, op | (imm7 << 15) | (rt2 << 10) | (rn << 5) | rt);
 }
 
 enum  LogicalOpcode {
@@ -220,8 +219,7 @@ enum  LogicalOpcode {
 static void
 emit_logical_register(struct jit_state *state, bool sixty_four, enum LogicalOpcode op, enum Registers rd, enum Registers rn, enum Registers rm)
 {
-    uint32_t instr = (sixty_four << 31) | op | (1 << 27) | (1 << 25) | (rm << 16) | (rn << 5) | rd;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, (sixty_four << 31) | op | (1 << 27) | (1 << 25) | (rm << 16) | (rn << 5) | rd);
 }
 
 enum UnconditionalBranchOpcode {
@@ -314,8 +312,7 @@ enum DP1Opcode {
 static void
 emit_dataprocessing_onesource(struct jit_state *state, bool sixty_four, enum DP1Opcode op, enum Registers rd, enum Registers rn)
 {
-    uint32_t instr = (sixty_four << 31) | op | (rn << 5) | rd;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, (sixty_four << 31) | op | (rn << 5) | rd);
 }
 
 enum DP2Opcode {
@@ -331,8 +328,7 @@ enum DP2Opcode {
 static void
 emit_dataprocessing_twosource(struct jit_state *state, bool sixty_four, enum DP2Opcode op, enum Registers rd, enum Registers rn, enum Registers rm)
 {
-    uint32_t instr = (sixty_four << 31) | op | (rm << 16) | (rn << 5) | rd;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, (sixty_four << 31) | op | (rm << 16) | (rn << 5) | rd);
 }
 
 enum DP3Opcode {
@@ -344,11 +340,8 @@ enum DP3Opcode {
 static void
 emit_dataprocessing_threesource(struct jit_state *state, bool sixty_four, enum DP3Opcode op, enum Registers rd, enum Registers rn, enum Registers rm, enum Registers ra)
 {
-    uint32_t instr = (sixty_four << 31) | op | (rm << 16) | (ra << 10) | (rn << 5) | rd;
-    emit_bytes(state, &instr, 4);
+    emit_instruction(state, (sixty_four << 31) | op | (rm << 16) | (ra << 10) | (rn << 5) | rd);
 }
-
-
 
 enum MoveWideOpcode {
                           //  op
@@ -360,6 +353,10 @@ enum MoveWideOpcode {
 static void
 emit_movewide_immediate(struct jit_state *state, bool sixty_four, enum Registers rd, uint64_t imm)
 {
+    /* Emit a MOVZ or MOVN followed by a sequence of MOVKs to generate the 64-bit constant in imm.
+     * See whether the 0x0000 or 0xffff pattern is more common in the immediate.  This ensures we
+     * produce the fewest number of immediates.
+     */
     unsigned count0000 = 0;
     unsigned countffff = 0;
     for (unsigned i = 0; i < (sixty_four ? 64 : 32); i += 16) {
@@ -371,6 +368,7 @@ emit_movewide_immediate(struct jit_state *state, bool sixty_four, enum Registers
         }
     }
 
+    /* Iterate over 16-bit elements of imm, outputting an appropriate move instruction.  */
     enum MoveWideOpcode op = (count0000 >= countffff) ? MW_MOVZ : MW_MOVN;
     bool invert = (count0000 < countffff);
     uint64_t skip_pattern = (count0000 >= countffff) ? 0 : 0xffff;
@@ -397,6 +395,7 @@ static void update_adr_immediate(struct jit_state *state, uint32_t offset, int64
 {
     assert((imm21 >> 21) == 0 || (imm21 >> 21) == INT64_C(-1));
 
+    /* Read-modify-write the instruction.  */
     uint32_t instr;
     memcpy(&instr, state->buf + offset, sizeof(uint32_t));
     instr |= (imm21 & 3) << 29;
@@ -410,10 +409,8 @@ static void update_branch_immediate(struct jit_state *state, uint32_t offset, in
     uint32_t instr;
     imm >>= 2;
     memcpy(&instr, state->buf + offset, sizeof(uint32_t));
-    if ((instr & 0xfe000000) == 0x54000000
-        || (instr & 0x7e000000) == 0x34000000) {
-        /* Conditional branch immediate.  */
-        /* Compare and branch immediate.  */
+    if ((instr & 0xfe000000) == 0x54000000          /* Conditional branch immediate.  */
+        || (instr & 0x7e000000) == 0x34000000) {    /* Compare and branch immediate.  */
         assert((imm >> 19) == INT64_C(-1) || (imm >> 19) == 0);
         instr |= (imm & 0x7ffff) << 5;
     }
